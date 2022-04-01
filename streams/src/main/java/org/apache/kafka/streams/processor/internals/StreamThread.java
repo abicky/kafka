@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
+import java.util.Date;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -147,9 +148,10 @@ public class StreamThread extends Thread {
         STARTING(2, 3, 5),                // 1
         PARTITIONS_REVOKED(2, 3, 5),      // 2
         PARTITIONS_ASSIGNED(2, 3, 4, 5),  // 3
-        RUNNING(2, 3, 4, 5),              // 4
+        RUNNING(2, 3, 4, 5, 7),           // 4
         PENDING_SHUTDOWN(6),              // 5
-        DEAD;                             // 6
+        DEAD,                              // 6
+        PAUSED(4); // 7
 
         private final Set<Integer> validTransitions = new HashSet<>();
 
@@ -158,7 +160,8 @@ public class StreamThread extends Thread {
         }
 
         public boolean isAlive() {
-            return equals(RUNNING) || equals(STARTING) || equals(PARTITIONS_REVOKED) || equals(PARTITIONS_ASSIGNED);
+            // JNH: Add PAUSED state.
+            return equals(PAUSED) || equals(RUNNING) || equals(STARTING) || equals(PARTITIONS_REVOKED) || equals(PARTITIONS_ASSIGNED);
         }
 
         @Override
@@ -215,6 +218,7 @@ public class StreamThread extends Thread {
         synchronized (stateLock) {
             oldState = state;
 
+            log.info("Checking transition from {} to {}.", state, newState);
             if (state == State.PENDING_SHUTDOWN && newState != State.DEAD) {
                 log.debug("Ignoring request to transit from PENDING_SHUTDOWN to {}: " +
                               "only DEAD state is a valid next state", newState);
@@ -237,6 +241,9 @@ public class StreamThread extends Thread {
             state = newState;
             if (newState == State.RUNNING) {
                 updateThreadMetadata(taskManager.activeTaskMap(), taskManager.standbyTaskMap());
+            } else if (newState == State.PAUSED) {
+                // JNH: Wild guess
+                updateThreadMetadata(Collections.emptyMap(), Collections.emptyMap());
             }
 
             stateLock.notifyAll();
@@ -251,6 +258,7 @@ public class StreamThread extends Thread {
 
     public boolean isRunning() {
         synchronized (stateLock) {
+            // JNH: Return false for PAUSED
             return state.isAlive();
         }
     }
@@ -586,7 +594,18 @@ public class StreamThread extends Thread {
                 if (size != -1L) {
                     cacheResizer.accept(size);
                 }
-                runOnce();
+
+                // This works when *everyone* is paused.
+                if (state == State.PAUSED) {
+                    synchronized (stateLock) {
+                        stateLock.wait();
+                    }
+                }
+
+                if (state != State.PAUSED) {
+                    log.info("Paused at {}", new Date());
+                    runOnce();
+                }
                 if (nextProbingRebalanceMs.get() < time.milliseconds()) {
                     log.info("Triggering the followup rebalance scheduled for {} ms.", nextProbingRebalanceMs.get());
                     mainConsumer.enforceRebalance();
@@ -740,6 +759,7 @@ public class StreamThread extends Thread {
         // Should only proceed when the thread is still running after #pollRequests(), because no external state mutation
         // could affect the task manager state beyond this point within #runOnce().
         if (!isRunning()) {
+            // JNH Could skip runOnce if isAlive returns false.
             log.debug("Thread state is already {}, skipping the run once call after poll request", state);
             return;
         }
@@ -1102,6 +1122,32 @@ public class StreamThread extends Thread {
 
         return Math.max(now - previous, 0);
     }
+
+    // Returns true if successful in pausing.
+    public boolean pauseProcessing() {
+        System.out.println("Calling pause for " + this);
+        if (state == State.RUNNING) {
+            log.info("Stream was running; now pausing");
+            setState(State.PAUSED);
+            return true;
+        } else {
+            log.warn("Stream was in state {} cannot pause.", state);
+            return false;
+        }
+    }
+
+    public boolean resumeProcessing() {
+        System.out.println("Calling resume for " + this);
+        if (state == State.PAUSED) {
+            log.info("Stream was running; now pausing processing.");
+            setState(State.RUNNING);
+            return true;
+        } else {
+            log.warn("Stream was in state {} cannot resume processing.", state);
+            return false;
+        }
+    }
+
 
     /**
      * Shutdown this stream thread.

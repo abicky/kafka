@@ -66,6 +66,7 @@ public interface Task {
      *                +----------------+
      * </pre>
      */
+    // JNH: Add Pause to Task.
     enum State {
         CREATED(1, 3),            // 0
         RESTORING(2, 3),          // 1

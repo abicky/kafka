@@ -1651,6 +1651,16 @@ public class KafkaStreams implements AutoCloseable {
         return queryableStoreProvider.getStore(storeQueryParameters);
     }
 
+    public void pause() {
+        System.out.println("In AK Streams calling pause()");
+        processStreamThread(StreamThread::pauseProcessing);
+    }
+
+    public void resume() {
+        System.out.println("In AK Streams calling resume()");
+        processStreamThread(StreamThread::resumeProcessing);
+    }
+
     /**
      * handle each stream thread in a snapshot of threads.
      * noted: iteration over SynchronizedList is not thread safe so it must be manually synchronized. However, we may

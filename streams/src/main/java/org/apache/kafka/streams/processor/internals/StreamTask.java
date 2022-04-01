@@ -366,7 +366,7 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
                 }
 
                 transitionTo(State.RESTORING);
-                log.info("Resumed to restoring state");
+                log.info("Resumed to restoring state sdfg df    `");
 
                 break;
 

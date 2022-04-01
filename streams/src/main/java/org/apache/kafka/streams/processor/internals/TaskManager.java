@@ -578,6 +578,8 @@ public class TaskManager {
 
         // we enforce checkpointing upon suspending a task: if it is resumed later we just proceed normally, if it is
         // going to be closed we would checkpoint by then
+        // JNH: Read this function!
+        // This appears to show commit before suspending
         for (final Task task : revokedActiveTasks) {
             if (!dirtyTasks.contains(task)) {
                 try {
